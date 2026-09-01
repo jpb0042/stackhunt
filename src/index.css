@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-paper-50 text-ink-900 antialiased;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .chip {
+    @apply inline-flex items-center rounded-full border border-ink-900/10 bg-white px-2.5 py-0.5 text-xs font-medium text-ink-900;
+  }
+}
