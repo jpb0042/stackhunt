@@ -1,36 +1,24 @@
 import type { JobListing } from '../shared/types'
+import { googleJson, googleKey } from './google'
 
 type Coords = { lat: number; lon: number }
 
 const geoCache = new Map<string, Coords | null>()
+const MATRIX_BATCH = 25
 
-function haversineMiles(a: Coords, b: Coords): number {
-  const toRad = (n: number) => (n * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLon = toRad(b.lon - a.lon)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
-  return 3958.8 * 2 * Math.asin(Math.min(1, Math.sqrt(h)))
+function waypoint(coords: Coords) {
+  return {
+    waypoint: {
+      location: { latLng: { latitude: coords.lat, longitude: coords.lon } },
+    },
+  }
 }
 
-async function geocodeAddress(address: string): Promise<Coords | null> {
-  const key = `addr:${address.toLowerCase().trim()}`
-  if (geoCache.has(key)) return geoCache.get(key) ?? null
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Stackhunt/0.1 (job search app)' },
-    signal: AbortSignal.timeout(8000),
-  })
-  if (!res.ok) {
-    geoCache.set(key, null)
-    return null
-  }
-  const data = (await res.json()) as Array<{ lat: string; lon: string }>
-  const coords = data[0] ? { lat: Number(data[0].lat), lon: Number(data[0].lon) } : null
-  geoCache.set(key, coords)
-  return coords
+function parseDurationSeconds(value: string | undefined): number | null {
+  if (!value) return null
+  const match = /^([\d.]+)s$/.exec(value)
+  if (!match) return null
+  return Number(match[1])
 }
 
 async function geocodePlace(place: string): Promise<Coords | null> {
@@ -38,48 +26,83 @@ async function geocodePlace(place: string): Promise<Coords | null> {
   if (!cleaned || /remote|anywhere|not specified|flexible/i.test(cleaned)) return null
   const key = `place:${cleaned.toLowerCase()}`
   if (geoCache.has(key)) return geoCache.get(key) ?? null
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cleaned)}&count=1&language=en&format=json`
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-  if (!res.ok) {
-    geoCache.set(key, null)
-    return null
+
+  const url =
+    'https://maps.googleapis.com/maps/api/geocode/json' +
+    `?address=${encodeURIComponent(cleaned)}&key=${encodeURIComponent(googleKey())}`
+  const data = (await googleJson(url, { method: 'GET' })) as {
+    results?: Array<{ geometry?: { location?: { lat: number; lng: number } } }>
   }
-  const data = (await res.json()) as { results?: Array<{ latitude: number; longitude: number }> }
-  const first = data.results?.[0]
-  const coords = first ? { lat: first.latitude, lon: first.longitude } : null
+  const location = data.results?.[0]?.geometry?.location
+  const coords =
+    location && Number.isFinite(location.lat) && Number.isFinite(location.lng)
+      ? { lat: location.lat, lon: location.lng }
+      : null
   geoCache.set(key, coords)
   return coords
 }
 
-async function drivingCommute(
-  from: Coords,
-  to: Coords,
-): Promise<{ miles: number; minutes: number } | null> {
-  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-    if (!res.ok) return null
-    const data = (await res.json()) as {
-      routes?: Array<{ distance: number; duration: number }>
+async function drivingMatrix(
+  origin: Coords,
+  destinations: Coords[],
+): Promise<Array<{ miles: number; minutes: number } | null>> {
+  if (!destinations.length) return []
+  const data = await googleJson(
+    'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix',
+    {
+      method: 'POST',
+      fieldMask: 'originIndex,destinationIndex,duration,distanceMeters,condition',
+      body: JSON.stringify({
+        origins: [waypoint(origin)],
+        destinations: destinations.map(waypoint),
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_UNAWARE',
+      }),
+    },
+  )
+  const elements = Array.isArray(data) ? data : data ? [data] : []
+  const rows: Array<{ miles: number; minutes: number } | null> = destinations.map(() => null)
+  for (const element of elements as Array<{
+    destinationIndex?: number
+    duration?: string
+    distanceMeters?: number
+    condition?: string
+  }>) {
+    const index = element.destinationIndex ?? 0
+    const seconds = parseDurationSeconds(element.duration)
+    const meters = element.distanceMeters
+    if (element.condition && element.condition !== 'ROUTE_EXISTS') continue
+    if (meters == null || seconds == null) continue
+    rows[index] = {
+      miles: meters * 0.000621371,
+      minutes: seconds / 60,
     }
-    const route = data.routes?.[0]
-    if (!route) return null
-    return {
-      miles: route.distance * 0.000621371,
-      minutes: route.duration / 60,
-    }
-  } catch {
-    return null
   }
+  return rows
 }
 
-function formatCommute(miles: number, minutes: number | null, driving: boolean): string {
-  const mileText = miles < 10 ? miles.toFixed(1) : String(Math.round(miles))
-  if (minutes != null && driving) {
-    const mins = Math.max(1, Math.round(minutes))
-    return `${mileText} mi · ${mins} min drive`
+async function drivingCommutes(
+  origin: Coords,
+  destinations: Coords[],
+): Promise<Array<{ miles: number; minutes: number } | null>> {
+  const results: Array<{ miles: number; minutes: number } | null> = []
+  for (let i = 0; i < destinations.length; i += MATRIX_BATCH) {
+    results.push(...(await drivingMatrix(origin, destinations.slice(i, i + MATRIX_BATCH))))
   }
-  return `${mileText} mi straight-line`
+  return results
+}
+
+function formatCommute(miles: number, minutes: number): string {
+  const mileText = miles < 10 ? miles.toFixed(1) : String(Math.round(miles))
+  const mins = Math.max(1, Math.round(minutes))
+  return `${mileText} mi · ${mins} min drive`
+}
+
+function parseOrigin(lat: number | undefined, lon: number | undefined): Coords | null {
+  if (lat == null || lon == null) return null
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null
+  return { lat, lon }
 }
 
 export async function attachCommute(
@@ -87,6 +110,8 @@ export async function attachCommute(
   address: string | undefined,
   workMode: 'remote' | 'in-person' | 'both',
   maxCommuteMiles: number,
+  originLat?: number,
+  originLon?: number,
 ): Promise<JobListing[]> {
   if (workMode === 'remote' || !address?.trim()) {
     return jobs.map((job) => ({
@@ -95,9 +120,9 @@ export async function attachCommute(
     }))
   }
 
-  const origin = await geocodeAddress(address)
+  const origin = parseOrigin(originLat, originLon)
   if (!origin) {
-    throw new Error('Could not find that address. Try a fuller street, city, and state.')
+    throw new Error('Select an address from the suggestions so we can estimate commute.')
   }
 
   const uniquePlaces = [...new Set(jobs.filter((job) => !job.remote).map((job) => job.location))]
@@ -108,22 +133,13 @@ export async function attachCommute(
     }),
   )
 
+  const routable = uniquePlaces.filter((place) => placeCoords.get(place))
+  const destCoords = routable.map((place) => placeCoords.get(place)!)
+  const routes = await drivingCommutes(origin, destCoords)
   const routeCache = new Map<string, { miles: number; minutes: number } | null>()
-  await Promise.all(
-    uniquePlaces.map(async (place) => {
-      const dest = placeCoords.get(place)
-      if (!dest) {
-        routeCache.set(place, null)
-        return
-      }
-      const route = await drivingCommute(origin, dest)
-      if (route) routeCache.set(place, route)
-      else {
-        const miles = haversineMiles(origin, dest)
-        routeCache.set(place, { miles, minutes: miles * 1.5 })
-      }
-    }),
-  )
+  routable.forEach((place, index) => {
+    routeCache.set(place, routes[index] ?? null)
+  })
 
   const withCommute: JobListing[] = []
   for (const job of jobs) {
@@ -136,20 +152,19 @@ export async function attachCommute(
     }
     const dest = placeCoords.get(job.location) ?? null
     const route = routeCache.get(job.location)
-    if (!dest || !route) {
-      if (workMode === 'both') {
-        withCommute.push({ ...job, commuteLabel: 'Location unclear' })
-      }
-      continue
-    }
+    if (!dest || !route) continue
     if (route.miles > maxCommuteMiles) continue
     withCommute.push({
       ...job,
       commuteMiles: route.miles,
       commuteMinutes: route.minutes,
-      commuteLabel: formatCommute(route.miles, route.minutes, true),
+      commuteLabel: formatCommute(route.miles, route.minutes),
     })
   }
+
+  console.log(
+    `[commute] onsite=${jobs.filter((job) => !job.remote).length} places=${uniquePlaces.length} geocoded=${routable.length} kept=${withCommute.filter((job) => !job.remote).length}`,
+  )
 
   return withCommute.sort((a, b) => {
     if (a.remote !== b.remote) return a.remote ? 1 : -1

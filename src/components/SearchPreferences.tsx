@@ -1,20 +1,22 @@
 import { Building2, Globe, Loader2, Search, Shuffle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import type { WorkMode } from '@shared/types'
+import type { PlaceSuggestion, WorkMode } from '@shared/types'
 
 type Props = {
   workMode: WorkMode
   address: string
+  addressSelected: boolean
   maxCommuteMiles: number
   canSearch: boolean
   searching: boolean
   onWorkMode: (mode: WorkMode) => void
   onAddress: (value: string) => void
+  onPlace: (place: PlaceSuggestion) => void
   onMaxCommute: (miles: number) => void
   onSearch: () => void
 }
@@ -28,16 +30,18 @@ const MODES: Array<{ id: WorkMode; label: string; icon: LucideIcon }> = [
 export function SearchPreferences({
   workMode,
   address,
+  addressSelected,
   maxCommuteMiles,
   canSearch,
   searching,
   onWorkMode,
   onAddress,
+  onPlace,
   onMaxCommute,
   onSearch,
 }: Props) {
   const needsAddress = workMode !== 'remote'
-  const addressMissing = needsAddress && !address.trim()
+  const addressMissing = needsAddress && !addressSelected
   const blocked = !canSearch || addressMissing
 
   return (
@@ -71,17 +75,18 @@ export function SearchPreferences({
       </div>
 
       {needsAddress && (
-        <div className="animate-fade-up space-y-5">
+        <div className="relative z-20 animate-fade-up space-y-5">
           <div className="space-y-2">
             <Label htmlFor="address">Home or office address</Label>
-            <Input
+            <AddressAutocomplete
               id="address"
               value={address}
-              onChange={(event) => onAddress(event.target.value)}
-              placeholder="123 Main St, Austin, TX"
+              selected={addressSelected}
+              onChange={onAddress}
+              onSelect={onPlace}
             />
             <p className="text-xs text-muted-foreground">
-              Used only to estimate commute for on-site listings.
+              Type your address, then select a match from the list.
             </p>
           </div>
 
@@ -127,7 +132,9 @@ export function SearchPreferences({
       )}
       {canSearch && addressMissing && (
         <p className="text-center text-sm text-muted-foreground">
-          An address is required for in-person results.
+          {address.trim()
+            ? 'Select an address from the list to continue.'
+            : 'An address is required for in-person results.'}
         </p>
       )}
     </div>

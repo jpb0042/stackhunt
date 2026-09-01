@@ -1,4 +1,4 @@
-import type { RepoProfile, SearchPage, SearchRequest } from '@shared/types'
+import type { PlaceSuggestion, RepoProfile, SearchPage, SearchRequest } from '@shared/types'
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -28,4 +28,30 @@ export async function profileGithub(url: string): Promise<RepoProfile> {
   if (!res.ok) throw new Error(await parseError(res))
   const body = (await res.json()) as { repo: RepoProfile }
   return body.repo
+}
+
+export async function suggestPlaces(
+  query: string,
+  signal?: AbortSignal,
+  session?: string,
+): Promise<PlaceSuggestion[]> {
+  const params = new URLSearchParams({ q: query })
+  if (session) params.set('session', session)
+  const res = await fetch(`/api/places/suggest?${params}`, { signal })
+  if (!res.ok) throw new Error(await parseError(res))
+  const body = (await res.json()) as { places: PlaceSuggestion[] }
+  return body.places
+}
+
+export async function resolvePlace(
+  placeId: string,
+  session?: string,
+  signal?: AbortSignal,
+): Promise<PlaceSuggestion> {
+  const params = new URLSearchParams({ id: placeId })
+  if (session) params.set('session', session)
+  const res = await fetch(`/api/places/details?${params}`, { signal })
+  if (!res.ok) throw new Error(await parseError(res))
+  const body = (await res.json()) as { place: PlaceSuggestion }
+  return body.place
 }

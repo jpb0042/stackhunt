@@ -12,7 +12,7 @@ import { profileGithub, searchJobs } from '@/lib/api'
 import { INTRO } from '@/lib/intro'
 import { loadSavedRepos, saveRepos } from '@/lib/storage'
 import { mergeLists } from '@shared/skills'
-import type { JobListing, RepoProfile, WorkMode } from '@shared/types'
+import type { JobListing, PlaceSuggestion, RepoProfile, WorkMode } from '@shared/types'
 
 gsap.registerPlugin(useGSAP)
 
@@ -20,6 +20,8 @@ export default function App() {
   const [repos, setRepos] = useState<RepoProfile[]>(loadSavedRepos)
   const [workMode, setWorkMode] = useState<WorkMode>('remote')
   const [address, setAddress] = useState('')
+  const [origin, setOrigin] = useState<{ lat: number; lon: number } | null>(null)
+  const [placePicked, setPlacePicked] = useState(false)
   const [maxCommuteMiles, setMaxCommuteMiles] = useState(30)
   const [jobs, setJobs] = useState<JobListing[] | null>(null)
   const [hasMore, setHasMore] = useState(false)
@@ -28,7 +30,6 @@ export default function App() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [githubBusy, setGithubBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [searchToken, setSearchToken] = useState(0)
   const dropCard = useRef<HTMLDivElement>(null)
 
   useGSAP(() => {
@@ -95,12 +96,13 @@ export default function App() {
         languages,
         workMode,
         address,
+        originLat: origin?.lat,
+        originLon: origin?.lon,
         maxCommuteMiles,
         page: 1,
       })
       setJobs(result.jobs)
       setHasMore(result.hasMore)
-      setSearchToken((token) => token + 1)
     } catch (err) {
       setJobs(null)
       setHasMore(false)
@@ -121,6 +123,8 @@ export default function App() {
         languages,
         workMode,
         address,
+        originLat: origin?.lat,
+        originLon: origin?.lon,
         maxCommuteMiles,
         page: nextPage,
       })
@@ -128,7 +132,7 @@ export default function App() {
         const seen = new Set((current ?? []).map((job) => job.id))
         return [...(current ?? []), ...result.jobs.filter((job) => !seen.has(job.id))]
       })
-      setHasMore(result.hasMore)
+      setHasMore(result.hasMore && result.jobs.length > 0)
       setPage(nextPage)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load more jobs')
@@ -158,11 +162,22 @@ export default function App() {
             <SearchPreferences
               workMode={workMode}
               address={address}
+              addressSelected={placePicked}
               maxCommuteMiles={maxCommuteMiles}
               canSearch={repos.length > 0}
               searching={searching}
               onWorkMode={setWorkMode}
-              onAddress={setAddress}
+              onAddress={(value) => {
+                setAddress(value)
+                setOrigin(null)
+                setPlacePicked(false)
+              }}
+              onPlace={(place: PlaceSuggestion) => {
+                if (place.lat == null || place.lon == null) return
+                setAddress(place.label)
+                setPlacePicked(true)
+                setOrigin({ lat: place.lat, lon: place.lon })
+              }}
               onMaxCommute={setMaxCommuteMiles}
               onSearch={runSearch}
             />
@@ -177,7 +192,6 @@ export default function App() {
               loadingMore={loadingMore}
               hasMore={hasMore}
               error={error}
-              resetToken={searchToken}
               onLoadMore={loadMore}
             />
           </div>

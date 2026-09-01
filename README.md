@@ -9,7 +9,7 @@ Drop in local project folders (or paste a public GitHub URL). Stackhunt reads ma
 - Drag-and-drop folders or add a GitHub repo
 - Remote, in-person, or both (address required when listings are not remote)
 - Ranked results from JSearch (Google for Jobs: LinkedIn, Indeed, and others), The Muse, Arbeitnow, Greenhouse career pages, Remotive, and Jobicy
-- Filter by job board; search by title, company, or board
+- Ranked results from JSearch (Google for Jobs: LinkedIn, Indeed, and others), The Muse, Arbeitnow, Greenhouse career pages, Remotive, and Jobicy
 - First page loads ~40 listings quickly; **Load more** fetches the next 40
 - Inferred stack persisted in `localStorage`
 
@@ -35,6 +35,7 @@ API: [http://127.0.0.1:3001](http://127.0.0.1:3001) (proxied as `/api` in develo
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `RAPIDAPI_KEY` | No | [JSearch](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) key. Without it, LinkedIn/Indeed via Google for Jobs are skipped. |
+| `GOOGLE_API_KEY` | Yes for in-person | Places API (New), Geocoding API, and Routes API. Used for address autocomplete and commute. |
 | `PORT` | No | API port, defaults to `3001`. |
 
 JSearch queries stay short (`React developer jobs in remote`) so Google for Jobs returns results. The full inferred stack is used only for ranking.

@@ -30,11 +30,20 @@ export type JobListing = {
   commuteLabel?: string | null
 }
 
+export type PlaceSuggestion = {
+  id: string
+  label: string
+  lat?: number
+  lon?: number
+}
+
 export type SearchRequest = {
   skills: string[]
   languages: string[]
   workMode: WorkMode
   address: string
+  originLat?: number
+  originLon?: number
   maxCommuteMiles: number
   page?: number
 }

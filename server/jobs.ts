@@ -78,11 +78,21 @@ function primaryRole(skills: string[], languages: string[]): string {
   return skills[0] || languages[0] || 'software'
 }
 
+const COUNTRY_SUFFIX = /^(united states|usa|us|u\.s\.a?\.?|canada|uk|united kingdom|england)$/i
+
 function cityFromAddress(address: string): string | null {
   const parts = address
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean)
+  while (parts.length) {
+    const last = parts[parts.length - 1].replace(/\d+/g, '').trim()
+    if (COUNTRY_SUFFIX.test(last) || /^\d{5}(-\d{4})?$/.test(parts[parts.length - 1])) {
+      parts.pop()
+      continue
+    }
+    break
+  }
   if (parts.length >= 2) {
     const region = parts[parts.length - 1].replace(/\d+/g, '').trim()
     const city = parts[parts.length - 2]
@@ -524,7 +534,7 @@ function dedupe(jobs: RawJob[]): RawJob[] {
   return [...byKey.values()]
 }
 
-const PAGE_SIZE = 40
+export const PAGE_SIZE = 40
 
 type SearchCache = {
   jobs: JobListing[]
