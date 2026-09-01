@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowUpRight, Building2, Car, Globe, MapPin, Search } from 'lucide-react'
+import { ArrowUpRight, Building2, Car, Globe, Loader2, MapPin, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -8,24 +8,32 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import type { JobListing } from '@shared/types'
 
-const PAGE_SIZE = 40
-
 type Props = {
   jobs: JobListing[] | null
   searching: boolean
+  loadingMore: boolean
+  hasMore: boolean
   error: string | null
+  resetToken: number
+  onLoadMore: () => void
 }
 
-export function JobResults({ jobs, searching, error }: Props) {
+export function JobResults({
+  jobs,
+  searching,
+  loadingMore,
+  hasMore,
+  error,
+  resetToken,
+  onLoadMore,
+}: Props) {
   const [query, setQuery] = useState('')
   const [board, setBoard] = useState('all')
-  const [visible, setVisible] = useState(PAGE_SIZE)
 
   useEffect(() => {
     setQuery('')
     setBoard('all')
-    setVisible(PAGE_SIZE)
-  }, [jobs])
+  }, [resetToken])
 
   const boards = useMemo(() => {
     if (!jobs) return []
@@ -44,10 +52,6 @@ export function JobResults({ jobs, searching, error }: Props) {
     })
   }, [jobs, board, query])
 
-  useEffect(() => {
-    setVisible(PAGE_SIZE)
-  }, [board, query])
-
   if (searching) {
     return (
       <section className="space-y-3">
@@ -65,7 +69,7 @@ export function JobResults({ jobs, searching, error }: Props) {
     )
   }
 
-  if (error) {
+  if (error && !jobs?.length) {
     return (
       <Card className="border-destructive/40 bg-destructive/5 p-6 text-center">
         <p className="text-sm text-destructive">{error}</p>
@@ -86,17 +90,14 @@ export function JobResults({ jobs, searching, error }: Props) {
     )
   }
 
-  const shown = filtered.slice(0, visible)
-  const remaining = Math.max(0, filtered.length - shown.length)
-
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Matches</h2>
           <p className="font-mono text-sm text-muted-foreground">
-            {shown.length} of {filtered.length}
-            {filtered.length !== jobs.length ? ` · ${jobs.length} total` : ''}
+            {filtered.length} listing{filtered.length === 1 ? '' : 's'}
+            {filtered.length !== jobs.length ? ` · ${jobs.length} loaded` : ''}
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
@@ -127,6 +128,10 @@ export function JobResults({ jobs, searching, error }: Props) {
         </div>
       </div>
 
+      {error && jobs && jobs.length > 0 && (
+        <p className="text-sm text-destructive">{error}</p>
+      )}
+
       {filtered.length === 0 ? (
         <Card className="p-10 text-center">
           <p className="font-medium">No listings match that search</p>
@@ -137,11 +142,11 @@ export function JobResults({ jobs, searching, error }: Props) {
       ) : (
         <>
           <ul className="space-y-3">
-            {shown.map((job, index) => (
+            {filtered.map((job, index) => (
               <li
                 key={job.id}
                 className="animate-fade-up"
-                style={{ animationDelay: `${Math.min(index % PAGE_SIZE, 12) * 35}ms` }}
+                style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
               >
                 <Card className="group p-6 transition-colors hover:border-primary/40">
                   <div className="flex items-start justify-between gap-4">
@@ -199,13 +204,22 @@ export function JobResults({ jobs, searching, error }: Props) {
             ))}
           </ul>
 
-          {remaining > 0 && (
+          {hasMore && (
             <div className="flex justify-center pt-2">
-              <Button variant="outline" size="lg" onClick={() => setVisible((count) => count + PAGE_SIZE)}>
-                Load more
-                <span className="font-mono text-muted-foreground">
-                  {Math.min(PAGE_SIZE, remaining)}
-                </span>
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Loading more…
+                  </>
+                ) : (
+                  'Load more'
+                )}
               </Button>
             </div>
           )}

@@ -27,15 +27,21 @@ app.post('/api/jobs/search', async (req, res) => {
   }
 
   try {
-    const jobs = await searchJobs({
+    const result = await searchJobs({
       skills,
       languages,
       workMode,
       address,
       maxCommuteMiles,
+      page: Number(body.page) || 1,
     })
-    const withCommute = await attachCommute(jobs, address, workMode, maxCommuteMiles)
-    res.json({ jobs: withCommute })
+    const withCommute = await attachCommute(result.jobs, address, workMode, maxCommuteMiles)
+    res.json({
+      jobs: withCommute,
+      hasMore: result.hasMore,
+      total: result.total,
+      page: result.page,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Search failed'
     res.status(500).json({ error: message })

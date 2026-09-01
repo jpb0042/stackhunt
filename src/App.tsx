@@ -15,9 +15,13 @@ export default function App() {
   const [address, setAddress] = useState('')
   const [maxCommuteMiles, setMaxCommuteMiles] = useState(30)
   const [jobs, setJobs] = useState<JobListing[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [page, setPage] = useState(1)
   const [searching, setSearching] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [githubBusy, setGithubBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [searchToken, setSearchToken] = useState(0)
 
   useEffect(() => {
     saveRepos(repos)
@@ -40,6 +44,8 @@ export default function App() {
       return next
     })
     setJobs(null)
+    setHasMore(false)
+    setPage(1)
   }
 
   async function addGithub(url: string) {
@@ -54,15 +60,52 @@ export default function App() {
   async function runSearch() {
     setSearching(true)
     setError(null)
+    setPage(1)
     try {
-      setJobs(
-        await searchJobs({ skills, languages, workMode, address, maxCommuteMiles }),
-      )
+      const result = await searchJobs({
+        skills,
+        languages,
+        workMode,
+        address,
+        maxCommuteMiles,
+        page: 1,
+      })
+      setJobs(result.jobs)
+      setHasMore(result.hasMore)
+      setSearchToken((token) => token + 1)
     } catch (err) {
       setJobs(null)
+      setHasMore(false)
       setError(err instanceof Error ? err.message : 'Search failed')
     } finally {
       setSearching(false)
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    setError(null)
+    try {
+      const nextPage = page + 1
+      const result = await searchJobs({
+        skills,
+        languages,
+        workMode,
+        address,
+        maxCommuteMiles,
+        page: nextPage,
+      })
+      setJobs((current) => {
+        const seen = new Set((current ?? []).map((job) => job.id))
+        return [...(current ?? []), ...result.jobs.filter((job) => !seen.has(job.id))]
+      })
+      setHasMore(result.hasMore)
+      setPage(nextPage)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load more jobs')
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -119,7 +162,15 @@ export default function App() {
 
         {(searching || error || jobs) && (
           <div className="mt-10">
-            <JobResults jobs={jobs} searching={searching} error={error} />
+            <JobResults
+              jobs={jobs}
+              searching={searching}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              error={error}
+              resetToken={searchToken}
+              onLoadMore={loadMore}
+            />
           </div>
         )}
       </main>

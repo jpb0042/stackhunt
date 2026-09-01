@@ -36,4 +36,12 @@ export type SearchRequest = {
   workMode: WorkMode
   address: string
   maxCommuteMiles: number
+  page?: number
+}
+
+export type SearchPage = {
+  jobs: JobListing[]
+  hasMore: boolean
+  total: number
+  page: number
 }

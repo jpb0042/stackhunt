@@ -1,4 +1,4 @@
-import type { JobListing, SearchRequest, WorkMode } from '../shared/types'
+import type { JobListing, SearchPage, SearchRequest, WorkMode } from '../shared/types'
 
 const FETCH_MS = 9000
 
@@ -349,22 +349,26 @@ async function fromJSearch(
   languages: string[],
   workMode: WorkMode,
   address: string,
+  range: { start: number; count: number; pages: number },
 ): Promise<RawJob[]> {
   const key = process.env.RAPIDAPI_KEY?.trim()
   if (!key) return []
 
-  const searches = jsearchQueries(skills, languages, workMode, address)
+  const searches = jsearchQueries(skills, languages, workMode, address).slice(
+    range.start,
+    range.start + range.count,
+  )
   const collected: RawJob[] = []
 
   for (const [index, search] of searches.entries()) {
     if (index > 0) await sleep(600)
     try {
-      const jobs = await fetchJSearchPage(search, key, workMode)
+      const jobs = await fetchJSearchPage(search, key, workMode, range.pages)
       const publishers: Record<string, number> = {}
       for (const job of jobs) {
         publishers[job.board] = (publishers[job.board] || 0) + 1
       }
-      console.log(`[JSearch] query="${search}" jobs=${jobs.length}`, publishers)
+      console.log(`[JSearch] query="${search}" pages=${range.pages} jobs=${jobs.length}`, publishers)
       collected.push(...jobs)
     } catch (error) {
       console.warn(`JSearch request failed for "${search}":`, error)
@@ -416,10 +420,11 @@ async function fetchJSearchPage(
   search: string,
   key: string,
   workMode: WorkMode,
+  pages: number,
 ): Promise<RawJob[]> {
   const params = new URLSearchParams({
     query: search,
-    num_pages: '3',
+    num_pages: String(pages),
     country: 'us',
     date_posted: 'all',
     exclude_job_publishers: EXCLUDED_PUBLISHERS.join(','),
@@ -433,7 +438,7 @@ async function fetchJSearchPage(
       'X-RapidAPI-Key': key,
       'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
     },
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(pages > 1 ? 45000 : 20000),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -519,30 +524,120 @@ function dedupe(jobs: RawJob[]): RawJob[] {
   return [...byKey.values()]
 }
 
-export async function searchJobs(request: SearchRequest): Promise<JobListing[]> {
-  const query = queryFromSkills(request.skills, request.languages)
-  const inPersonOnly = request.workMode === 'in-person'
+const PAGE_SIZE = 40
 
-  const tasks: Array<Promise<RawJob[]>> = [
-    fromMuse(query),
-    fromArbeitnow(),
-    fromGreenhouse(),
-    fromAdzuna(query, request.workMode),
-    fromJSearch(request.skills, request.languages, request.workMode, request.address),
-  ]
-  if (!inPersonOnly) {
-    tasks.push(fromRemotive(query), fromJobicy(query))
-  }
+type SearchCache = {
+  jobs: JobListing[]
+  jsearchNext: number
+  queryCount: number
+}
 
-  const settled = await Promise.allSettled(tasks)
-  const merged = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
-  const filtered = dedupe(merged).filter((job) => matchesMode(job, request.workMode))
+const searchCache = new Map<string, SearchCache>()
 
-  return filtered
+function searchCacheKey(request: SearchRequest): string {
+  return JSON.stringify({
+    skills: request.skills,
+    languages: request.languages,
+    workMode: request.workMode,
+    address: request.address.trim(),
+    maxCommuteMiles: request.maxCommuteMiles,
+  })
+}
+
+function rankJobs(jobs: RawJob[], skills: string[], languages: string[]): JobListing[] {
+  return dedupe(jobs)
     .map((job) => ({
       ...job,
-      score: scoreJob(job, request.skills, request.languages),
+      score: scoreJob(job, skills, languages),
     }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 120)
+}
+
+async function gatherJobs(
+  request: SearchRequest,
+  jsearch: { start: number; count: number; pages: number },
+): Promise<RawJob[]> {
+  const query = queryFromSkills(request.skills, request.languages)
+  const inPersonOnly = request.workMode === 'in-person'
+  const tasks: Array<Promise<RawJob[]>> = [
+    fromJSearch(
+      request.skills,
+      request.languages,
+      request.workMode,
+      request.address,
+      jsearch,
+    ),
+  ]
+  if (jsearch.start === 0) {
+    tasks.push(
+      fromMuse(query),
+      fromArbeitnow(),
+      fromGreenhouse(),
+      fromAdzuna(query, request.workMode),
+    )
+    if (!inPersonOnly) tasks.push(fromRemotive(query), fromJobicy(query))
+  }
+  const settled = await Promise.allSettled(tasks)
+  return settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+}
+
+export async function searchJobs(request: SearchRequest): Promise<SearchPage> {
+  const page = Math.max(1, request.page ?? 1)
+  const key = searchCacheKey(request)
+  const queryCount = jsearchQueries(
+    request.skills,
+    request.languages,
+    request.workMode,
+    request.address,
+  ).length
+
+  if (page === 1) {
+    const raw = await gatherJobs(request, { start: 0, count: 1, pages: 1 })
+    const jobs = rankJobs(
+      raw.filter((job) => matchesMode(job, request.workMode)),
+      request.skills,
+      request.languages,
+    )
+    searchCache.set(key, { jobs, jsearchNext: 1, queryCount })
+  } else {
+    let cached = searchCache.get(key)
+    if (!cached) {
+      await searchJobs({ ...request, page: 1 })
+      cached = searchCache.get(key)
+    }
+    if (cached) {
+      const needed = page * PAGE_SIZE
+      while (cached.jobs.length < needed && cached.jsearchNext < cached.queryCount) {
+        const extra = await gatherJobs(request, {
+          start: cached.jsearchNext,
+          count: 1,
+          pages: 1,
+        })
+        const seen = new Set(
+          cached.jobs.map((job) => `${job.company.toLowerCase()}::${job.title.toLowerCase()}`),
+        )
+        const newcomers = rankJobs(
+          extra.filter(
+            (job) =>
+              matchesMode(job, request.workMode) &&
+              !seen.has(`${job.company.toLowerCase()}::${job.title.toLowerCase()}`),
+          ),
+          request.skills,
+          request.languages,
+        )
+        cached.jobs.push(...newcomers)
+        cached.jsearchNext += 1
+      }
+    }
+  }
+
+  const cached = searchCache.get(key)
+  if (!cached) {
+    return { jobs: [], hasMore: false, total: 0, page }
+  }
+  const start = (page - 1) * PAGE_SIZE
+  const jobs = cached.jobs.slice(start, start + PAGE_SIZE)
+  const hasMore =
+    start + jobs.length < cached.jobs.length || cached.jsearchNext < cached.queryCount
+  return { jobs, hasMore, total: cached.jobs.length, page }
 }

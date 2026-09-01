@@ -1,4 +1,4 @@
-import type { JobListing, RepoProfile, SearchRequest } from '@shared/types'
+import type { RepoProfile, SearchPage, SearchRequest } from '@shared/types'
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -9,15 +9,14 @@ async function parseError(res: Response): Promise<string> {
   }
 }
 
-export async function searchJobs(request: SearchRequest): Promise<JobListing[]> {
+export async function searchJobs(request: SearchRequest): Promise<SearchPage> {
   const res = await fetch('/api/jobs/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   })
   if (!res.ok) throw new Error(await parseError(res))
-  const body = (await res.json()) as { jobs: JobListing[] }
-  return body.jobs
+  return res.json() as Promise<SearchPage>
 }
 
 export async function profileGithub(url: string): Promise<RepoProfile> {
