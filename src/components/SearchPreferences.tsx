@@ -77,7 +77,7 @@ export function SearchPreferences({
       {needsAddress && (
         <div className="relative z-20 animate-fade-up space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="address">Home or office address</Label>
+            <Label htmlFor="address">Home address</Label>
             <AddressAutocomplete
               id="address"
               value={address}
