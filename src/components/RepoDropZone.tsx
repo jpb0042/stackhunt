@@ -142,7 +142,12 @@ export function RepoDropZone({ repos, onRepos, onGithub, onRemove, busy }: Props
             className="pl-10"
           />
         </div>
-        <Button type="submit" variant="secondary" disabled={busy || !githubUrl.trim()}>
+        <Button
+          type="submit"
+          variant="secondary"
+          disabled={busy || !githubUrl.trim()}
+          className="h-11"
+        >
           {busy ? <Loader2 className="animate-spin" /> : 'Add'}
         </Button>
       </form>

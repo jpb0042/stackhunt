@@ -22,12 +22,14 @@ export function Wordmark() {
         {
           clipPath: 'inset(0 108% 0 -8%)',
           letterSpacing: '0.38em',
+          textIndent: '0.38em',
           filter: 'blur(8px)',
           opacity: 0,
         },
         {
           clipPath: 'inset(0 -8% 0 -8%)',
           letterSpacing: '0.12em',
+          textIndent: '0.12em',
           filter: 'blur(0px)',
           opacity: 1,
           duration: INTRO.wordmark,
@@ -46,7 +48,7 @@ export function Wordmark() {
     >
       <p
         ref={label}
-        className="wordmark-text w-full text-center font-extrabold uppercase leading-none tracking-[0.12em]"
+        className="wordmark-text w-full text-center font-extrabold uppercase leading-none tracking-[0.12em] indent-[0.12em]"
       >
         {WORD}
       </p>
