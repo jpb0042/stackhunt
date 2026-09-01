@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
+import { JobResults } from '@/components/JobResults'
 import { RepoDropZone } from '@/components/RepoDropZone'
 import { SearchPreferences } from '@/components/SearchPreferences'
-import { SkillProfile } from '@/components/SkillProfile'
-import { JobResults } from '@/components/JobResults'
+import { Card, CardContent } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
 import { profileGithub, searchJobs } from '@/lib/api'
 import { mergeLists } from '@shared/skills'
 import type { JobListing, RepoProfile, WorkMode } from '@shared/types'
@@ -39,8 +40,7 @@ export default function App() {
   async function addGithub(url: string) {
     setGithubBusy(true)
     try {
-      const repo = await profileGithub(url)
-      addRepos([repo])
+      addRepos([await profileGithub(url)])
     } finally {
       setGithubBusy(false)
     }
@@ -50,14 +50,9 @@ export default function App() {
     setSearching(true)
     setError(null)
     try {
-      const results = await searchJobs({
-        skills,
-        languages,
-        workMode,
-        address,
-        maxCommuteMiles,
-      })
-      setJobs(results)
+      setJobs(
+        await searchJobs({ skills, languages, workMode, address, maxCommuteMiles }),
+      )
     } catch (err) {
       setJobs(null)
       setError(err instanceof Error ? err.message : 'Search failed')
@@ -67,46 +62,61 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-ink-900/10 bg-paper-100/80">
-        <div className="mx-auto flex max-w-6xl items-baseline justify-between gap-4 px-4 py-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rust-600">
-              Stackhunt
-            </p>
-            <h1 className="mt-1 font-serif text-4xl font-medium text-ink-950">
-              Jobs for the work you already ship
-            </h1>
-            <p className="mt-2 max-w-xl text-sm text-ink-700">
-              Drop in repos, pick remote or in person, and get ranked links from public
-              boards. In-person listings include commute from your address.
-            </p>
-          </div>
-        </div>
-      </header>
+    <div className="glow-backdrop grid-backdrop relative min-h-screen">
+      <div
+        aria-hidden
+        className="relative z-10 w-full overflow-hidden select-none px-2 pt-3 sm:pt-4"
+      >
+        <p className="w-full text-center font-extrabold uppercase leading-none tracking-[0.06em] text-primary/20 text-[clamp(2.75rem,14vw,11rem)]">
+          STACKHUNT
+        </p>
+      </div>
+      <main className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-28 pt-8 sm:pt-10">
+        <header className="text-center">
+          <h1 className="text-balance text-5xl font-bold leading-[1.05] tracking-tight sm:text-6xl">
+            Jobs for the work
+            <br />
+            <span className="bg-gradient-to-br from-foreground to-muted-foreground bg-clip-text text-transparent">
+              you already ship
+            </span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground">
+            Drop in your repos and Stackhunt reads the stack you actually work in, then
+            pulls matching roles from public job boards with commute times included.
+          </p>
+        </header>
 
-      <main className="mx-auto grid max-w-6xl gap-4 px-4 py-8 lg:grid-cols-2">
-        <div className="space-y-4">
-          <RepoDropZone onRepos={addRepos} onGithub={addGithub} busy={githubBusy} />
-          <SkillProfile
-            repos={repos}
-            onRemove={(name) => setRepos((current) => current.filter((repo) => repo.name !== name))}
-          />
-        </div>
-        <div className="space-y-4">
-          <SearchPreferences
-            workMode={workMode}
-            address={address}
-            maxCommuteMiles={maxCommuteMiles}
-            canSearch={repos.length > 0}
-            searching={searching}
-            onWorkMode={setWorkMode}
-            onAddress={setAddress}
-            onMaxCommute={setMaxCommuteMiles}
-            onSearch={runSearch}
-          />
-          <JobResults jobs={jobs} searching={searching} error={error} />
-        </div>
+        <Card className="mt-12">
+          <CardContent className="space-y-6 p-6 sm:p-8">
+            <RepoDropZone
+              repos={repos}
+              onRepos={addRepos}
+              onGithub={addGithub}
+              onRemove={(name) =>
+                setRepos((current) => current.filter((repo) => repo.name !== name))
+              }
+              busy={githubBusy}
+            />
+            <Separator className="bg-border/60" />
+            <SearchPreferences
+              workMode={workMode}
+              address={address}
+              maxCommuteMiles={maxCommuteMiles}
+              canSearch={repos.length > 0}
+              searching={searching}
+              onWorkMode={setWorkMode}
+              onAddress={setAddress}
+              onMaxCommute={setMaxCommuteMiles}
+              onSearch={runSearch}
+            />
+          </CardContent>
+        </Card>
+
+        {(searching || error || jobs) && (
+          <div className="mt-10">
+            <JobResults jobs={jobs} searching={searching} error={error} />
+          </div>
+        )}
       </main>
     </div>
   )

@@ -1,31 +1,47 @@
-import { useState } from 'react'
-import { profileDroppedItems, profileDirectoryHandle } from '@/lib/analyzeRepos'
+import { useRef, useState } from 'react'
+import { FolderOpen, GitBranch, Loader2, Plus, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { profileDirectoryHandle, profileDroppedItems } from '@/lib/analyzeRepos'
+import { cn } from '@/lib/utils'
+import type { RepoProfile } from '@shared/types'
 
 type Props = {
-  onRepos: (repos: Awaited<ReturnType<typeof profileDroppedItems>>) => void
+  repos: RepoProfile[]
+  onRepos: (repos: RepoProfile[]) => void
   onGithub: (url: string) => Promise<void>
+  onRemove: (name: string) => void
   busy?: boolean
 }
 
-export function RepoDropZone({ onRepos, onGithub, busy }: Props) {
+export function RepoDropZone({ repos, onRepos, onGithub, onRemove, busy }: Props) {
   const [over, setOver] = useState(false)
+  const [reading, setReading] = useState(false)
   const [githubUrl, setGithubUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const dragDepth = useRef(0)
   const canPick = typeof window !== 'undefined' && 'showDirectoryPicker' in window
+
+  const stack = [...new Set(repos.flatMap((repo) => [...repo.languages, ...repo.skills]))]
 
   async function handleDrop(event: React.DragEvent) {
     event.preventDefault()
+    dragDepth.current = 0
     setOver(false)
     setError(null)
+    setReading(true)
     try {
-      const repos = await profileDroppedItems(event.dataTransfer.items)
-      if (!repos.length) {
-        setError('Drop a project folder (not a single random file).')
+      const dropped = await profileDroppedItems(event.dataTransfer.items)
+      if (!dropped.length) {
+        setError('Drop a project folder so we can read its manifests.')
         return
       }
-      onRepos(repos)
+      onRepos(dropped)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not read that folder')
+    } finally {
+      setReading(false)
     }
   }
 
@@ -33,11 +49,13 @@ export function RepoDropZone({ onRepos, onGithub, busy }: Props) {
     setError(null)
     try {
       const handle = await window.showDirectoryPicker()
-      const repo = await profileDirectoryHandle(handle)
-      onRepos([repo])
+      setReading(true)
+      onRepos([await profileDirectoryHandle(handle)])
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      setError(err instanceof Error ? err.message : 'Could not open folder')
+      setError(err instanceof Error ? err.message : 'Could not open that folder')
+    } finally {
+      setReading(false)
     }
   }
 
@@ -53,59 +71,116 @@ export function RepoDropZone({ onRepos, onGithub, busy }: Props) {
   }
 
   return (
-    <section className="rounded-2xl border border-ink-900/10 bg-white p-5 shadow-card">
-      <h2 className="font-serif text-2xl font-medium text-ink-950">Your repos</h2>
-      <p className="mt-1 text-sm text-ink-700">
-        Drag in project folders. We read manifests and READMEs in the browser — source
-        stays on your machine.
-      </p>
-
+    <div className="space-y-4">
       <div
-        onDragOver={(event) => {
+        onDragEnter={(event) => {
           event.preventDefault()
+          dragDepth.current += 1
           setOver(true)
         }}
-        onDragLeave={() => setOver(false)}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={(event) => {
+          event.preventDefault()
+          dragDepth.current -= 1
+          if (dragDepth.current <= 0) setOver(false)
+        }}
         onDrop={handleDrop}
-        className={`mt-4 flex min-h-[160px] flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 text-center transition ${
+        className={cn(
+          'group relative flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed px-6 py-10 text-center transition-all duration-300',
           over
-            ? 'border-rust-500 bg-rust-500/5'
-            : 'border-ink-900/15 bg-paper-50'
-        }`}
+            ? 'border-primary/70 bg-primary/[0.07] shadow-[0_0_0_1px_hsl(var(--primary)/0.3),0_0_60px_-12px_hsl(var(--primary)/0.45)]'
+            : 'border-border bg-secondary/25 hover:border-border/80 hover:bg-secondary/40',
+        )}
       >
-        <p className="font-medium text-ink-950">Drop folders here</p>
-        <p className="mt-1 max-w-sm text-sm text-ink-700">
-          Chrome and Edge support folder drop. You can also pick a directory or paste a
-          public GitHub URL.
+        <div
+          className={cn(
+            'flex size-14 items-center justify-center rounded-2xl border border-border/70 bg-background/70 transition-transform duration-300',
+            over && 'scale-110 border-primary/50',
+          )}
+        >
+          {reading ? (
+            <Loader2 className="size-6 animate-spin text-primary" />
+          ) : (
+            <FolderOpen
+              className={cn(
+                'size-6 text-muted-foreground transition-colors',
+                over && 'text-primary',
+              )}
+            />
+          )}
+        </div>
+
+        <p className="mt-5 text-lg font-semibold tracking-tight">
+          {reading ? 'Reading your repos…' : 'Drop your repos here'}
         </p>
+        <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
+          Manifests and READMEs are parsed in your browser. Your source never leaves this
+          machine.
+        </p>
+
         {canPick && (
-          <button
+          <Button
             type="button"
+            variant="outline"
             onClick={pickFolder}
-            disabled={busy}
-            className="mt-4 rounded-full bg-ink-950 px-4 py-2 text-sm font-semibold text-paper-50 hover:bg-ink-900 disabled:opacity-50"
+            disabled={busy || reading}
+            className="mt-6"
           >
+            <Plus />
             Choose folder
-          </button>
+          </Button>
         )}
       </div>
 
-      <form onSubmit={addGithub} className="mt-4 flex gap-2">
-        <input
-          value={githubUrl}
-          onChange={(event) => setGithubUrl(event.target.value)}
-          placeholder="https://github.com/owner/repo"
-          className="min-w-0 flex-1 rounded-lg border border-ink-900/15 bg-paper-50 px-3 py-2 text-sm outline-none ring-rust-500/40 focus:ring-2"
-        />
-        <button
-          type="submit"
-          disabled={busy || !githubUrl.trim()}
-          className="rounded-lg border border-ink-900/15 bg-white px-3 py-2 text-sm font-semibold hover:bg-paper-100 disabled:opacity-50"
-        >
-          Add
-        </button>
+      <form onSubmit={addGithub} className="flex gap-2">
+        <div className="relative flex-1">
+          <GitBranch className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={githubUrl}
+            onChange={(event) => setGithubUrl(event.target.value)}
+            placeholder="github.com/owner/repo"
+            className="pl-10"
+          />
+        </div>
+        <Button type="submit" variant="secondary" disabled={busy || !githubUrl.trim()}>
+          {busy ? <Loader2 className="animate-spin" /> : 'Add'}
+        </Button>
       </form>
-      {error && <p className="mt-3 text-sm text-rust-700">{error}</p>}
-    </section>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {repos.length > 0 && (
+        <div className="space-y-3 rounded-xl border border-border/70 bg-secondary/25 p-4">
+          <div className="flex flex-wrap gap-2">
+            {repos.map((repo) => (
+              <span
+                key={`${repo.source}-${repo.name}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-background/60 py-1 pl-2.5 pr-1.5 text-sm"
+              >
+                <span className="font-mono text-[13px]">{repo.name}</span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(repo.name)}
+                  aria-label={`Remove ${repo.name}`}
+                  className="rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+
+          {stack.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 border-t border-border/60 pt-3">
+              {stack.map((item) => (
+                <Badge key={item} variant="secondary">
+                  {item}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

@@ -128,7 +128,10 @@ export async function attachCommute(
   const withCommute: JobListing[] = []
   for (const job of jobs) {
     if (job.remote) {
-      withCommute.push({ ...job, commuteLabel: 'Remote' })
+      withCommute.push({
+        ...job,
+        commuteLabel: job.remote ? 'Remote' : null,
+      })
       continue
     }
     const dest = placeCoords.get(job.location) ?? null

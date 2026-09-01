@@ -3,18 +3,87 @@
 @tailwind utilities;
 
 @layer base {
-  html {
-    @apply bg-paper-50 text-ink-900 antialiased;
-  }
-
-  body {
-    margin: 0;
-    min-height: 100vh;
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 8% 6%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 160 84% 45%;
+    --primary-foreground: 160 90% 6%;
+    --secondary: 240 4% 14%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 12%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 4% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5% 16%;
+    --input: 240 5% 18%;
+    --ring: 160 84% 45%;
+    --radius: 0.75rem;
   }
 }
 
-@layer components {
-  .chip {
-    @apply inline-flex items-center rounded-full border border-ink-900/10 bg-white px-2.5 py-0.5 text-xs font-medium text-ink-900;
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    min-height: 100vh;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  ::selection {
+    @apply bg-primary/25 text-foreground;
+  }
+}
+
+@layer utilities {
+  /* Ambient glow behind the hero, keeps the page from reading as a flat slab. */
+  .glow-backdrop::before {
+    content: '';
+    position: fixed;
+    inset: -30% 0 auto 0;
+    height: 70vh;
+    pointer-events: none;
+    background:
+      radial-gradient(50% 55% at 50% 0%, hsl(160 84% 45% / 0.16), transparent 70%),
+      radial-gradient(35% 45% at 80% 10%, hsl(200 90% 55% / 0.1), transparent 70%);
+    z-index: 0;
+  }
+
+  .grid-backdrop::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(hsl(0 0% 100% / 0.028) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(0 0% 100% / 0.028) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%);
+    z-index: 0;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-track {
+    background: transparent;
   }
 }

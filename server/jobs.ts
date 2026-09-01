@@ -1,5 +1,4 @@
 import type { JobListing, SearchRequest, WorkMode } from '../shared/types'
-import { uniq } from '../shared/skills'
 
 const FETCH_MS = 9000
 
@@ -47,8 +46,42 @@ function scoreJob(job: RawJob, skills: string[], languages: string[]): number {
 }
 
 function queryFromSkills(skills: string[], languages: string[]): string {
-  const parts = uniq([...languages.slice(0, 2), ...skills.slice(0, 4)])
-  return parts.join(' ') || 'software engineer'
+  return primaryRole(skills, languages)
+}
+
+const ROLE_PREFERENCE = [
+  'React',
+  'Next.js',
+  'Vue',
+  'Angular',
+  'Python',
+  'Go',
+  'Rust',
+  'Java',
+  'Node.js',
+  'TypeScript',
+  'Ruby',
+  'PHP',
+  'C#',
+  'Swift',
+  'Kotlin',
+]
+
+function primaryRole(skills: string[], languages: string[]): string {
+  const have = new Map(
+    [...skills, ...languages].map((item) => [item.toLowerCase(), item]),
+  )
+  for (const name of ROLE_PREFERENCE) {
+    const match = have.get(name.toLowerCase())
+    if (match) return match
+  }
+  return skills[0] || languages[0] || 'software'
+}
+
+function jsearchQuery(skills: string[], languages: string[], workMode: WorkMode): string {
+  const role = primaryRole(skills, languages)
+  const place = workMode === 'remote' ? 'remote' : 'united states'
+  return `${role} developer jobs in ${place}`
 }
 
 async function fromMuse(queryHint: string): Promise<RawJob[]> {
@@ -259,41 +292,146 @@ async function fromAdzuna(query: string, workMode: WorkMode): Promise<RawJob[]> 
   }).filter((job) => job.url)
 }
 
-async function fromJSearch(query: string): Promise<RawJob[]> {
-  const key = process.env.RAPIDAPI_KEY
+async function fromJSearch(
+  skills: string[],
+  languages: string[],
+  workMode: WorkMode,
+): Promise<RawJob[]> {
+  const key = process.env.RAPIDAPI_KEY?.trim()
   if (!key) return []
-  const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(query)}&num_pages=1`
-  const data = (await getJson(url, {
-    'X-RapidAPI-Key': key,
-    'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
-  })) as {
-    data?: Array<{
-      job_id: string
-      job_title: string
-      employer_name: string
-      job_city?: string
-      job_state?: string
-      job_country?: string
-      job_is_remote?: boolean
-      job_apply_link?: string
-      job_description?: string
-      job_publisher?: string
-    }>
+
+  const search = jsearchQuery(skills, languages, workMode)
+
+  try {
+    const jobs = await fetchJSearchPage(search, key, workMode)
+    const publishers: Record<string, number> = {}
+    for (const job of jobs) {
+      publishers[job.board] = (publishers[job.board] || 0) + 1
+    }
+    console.log(`[JSearch] query="${search}" jobs=${jobs.length}`, publishers)
+    return jobs
+  } catch (error) {
+    console.warn('JSearch request failed:', error)
+    return []
   }
-  return (data.data ?? []).map((job) => {
-    const location = [job.job_city, job.job_state, job.job_country].filter(Boolean).join(', ')
+}
+
+type JSearchHit = {
+  job_id: string
+  job_title: string
+  employer_name: string
+  job_city?: string
+  job_state?: string
+  job_country?: string
+  job_is_remote?: boolean
+  job_apply_link?: string
+  job_google_link?: string
+  job_description?: string
+  job_publisher?: string
+  job_location?: string | { city?: string; state?: string; country?: string }
+  apply_options?: Array<{ publisher?: string; apply_link?: string }>
+}
+
+function jsearchLocation(job: JSearchHit): string {
+  if (typeof job.job_location === 'string' && job.job_location.trim()) return job.job_location
+  if (job.job_location && typeof job.job_location === 'object') {
+    const nested = [job.job_location.city, job.job_location.state, job.job_location.country]
+      .filter(Boolean)
+      .join(', ')
+    if (nested) return nested
+  }
+  return [job.job_city, job.job_state, job.job_country].filter(Boolean).join(', ')
+}
+
+function jsearchHits(payload: unknown): JSearchHit[] {
+  if (!payload || typeof payload !== 'object') return []
+  const body = payload as { data?: unknown }
+  const data = body.data
+  if (Array.isArray(data)) return data as JSearchHit[]
+  if (data && typeof data === 'object' && Array.isArray((data as { jobs?: unknown }).jobs)) {
+    return (data as { jobs: JSearchHit[] }).jobs
+  }
+  return []
+}
+
+async function fetchJSearchPage(
+  search: string,
+  key: string,
+  workMode: WorkMode,
+): Promise<RawJob[]> {
+  const params = new URLSearchParams({
+    query: search,
+    num_pages: '1',
+    country: 'us',
+    date_posted: 'all',
+  })
+  if (workMode === 'remote') params.set('work_from_home', 'true')
+
+  const res = await fetch(`https://jsearch.p.rapidapi.com/search-v2?${params}`, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-RapidAPI-Key': key,
+      'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
+    },
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`JSearch ${res.status}${body ? `: ${body.slice(0, 180)}` : ''}`)
+  }
+
+  const payload = (await res.json()) as {
+    status?: string
+    message?: string
+    error?: { message?: string }
+    data?: unknown
+  }
+  if (payload.status && payload.status !== 'OK') {
+    throw new Error(
+      payload.error?.message || payload.message || `JSearch status ${payload.status}`,
+    )
+  }
+
+  return jsearchHits(payload).map((job) => {
+    const location = jsearchLocation(job)
+    const { url, board } = pickJSearchLink(job)
     return {
       id: `jsearch-${job.job_id}`,
       title: job.job_title,
       company: job.employer_name,
       location: location || (job.job_is_remote ? 'Remote' : 'Not specified'),
-      remote: Boolean(job.job_is_remote) || isRemoteText(location),
-      url: job.job_apply_link || '',
-      source: job.job_publisher || 'Google for Jobs',
-      board: job.job_publisher || 'Google for Jobs',
+      remote:
+        Boolean(job.job_is_remote) ||
+        isRemoteText(location) ||
+        isRemoteText(job.job_title) ||
+        isRemoteText(job.job_description || ''),
+      url,
+      source: 'JSearch',
+      board,
       snippet: snippet(job.job_description || ''),
     }
   }).filter((job) => job.url)
+}
+
+function pickJSearchLink(job: JSearchHit): { url: string; board: string } {
+  const options = job.apply_options ?? []
+  const preferred = options.find((option) =>
+    /linkedin|indeed/i.test(`${option.publisher ?? ''} ${option.apply_link ?? ''}`),
+  )
+  const url =
+    preferred?.apply_link ||
+    job.job_apply_link ||
+    options.find((option) => option.apply_link)?.apply_link ||
+    job.job_google_link ||
+    ''
+  const hay = `${preferred?.publisher ?? ''} ${job.job_publisher ?? ''} ${url}`.toLowerCase()
+  const board = hay.includes('linkedin')
+    ? 'LinkedIn'
+    : hay.includes('indeed')
+      ? 'Indeed'
+      : job.job_publisher || 'Google for Jobs'
+  return { url, board }
 }
 
 function matchesMode(job: RawJob, workMode: WorkMode): boolean {
@@ -302,16 +440,24 @@ function matchesMode(job: RawJob, workMode: WorkMode): boolean {
   return true
 }
 
+function boardPriority(job: RawJob): number {
+  const hay = `${job.board} ${job.url}`.toLowerCase()
+  if (hay.includes('linkedin')) return 3
+  if (hay.includes('indeed')) return 2
+  if (job.source === 'JSearch') return 1
+  return 0
+}
+
 function dedupe(jobs: RawJob[]): RawJob[] {
-  const seen = new Set<string>()
-  const out: RawJob[] = []
+  const byKey = new Map<string, RawJob>()
   for (const job of jobs) {
     const key = `${job.company.toLowerCase()}::${job.title.toLowerCase()}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(job)
+    const existing = byKey.get(key)
+    if (!existing || boardPriority(job) > boardPriority(existing)) {
+      byKey.set(key, job)
+    }
   }
-  return out
+  return [...byKey.values()]
 }
 
 export async function searchJobs(request: SearchRequest): Promise<JobListing[]> {
@@ -323,7 +469,7 @@ export async function searchJobs(request: SearchRequest): Promise<JobListing[]> 
     fromArbeitnow(),
     fromGreenhouse(),
     fromAdzuna(query, request.workMode),
-    fromJSearch(query),
+    fromJSearch(request.skills, request.languages, request.workMode),
   ]
   if (!inPersonOnly) {
     tasks.push(fromRemotive(query), fromJobicy(query))

@@ -1,3 +1,10 @@
+import { Building2, Globe, Loader2, Search, Shuffle } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Slider } from '@/components/ui/slider'
+import { cn } from '@/lib/utils'
 import type { WorkMode } from '@shared/types'
 
 type Props = {
@@ -12,10 +19,10 @@ type Props = {
   onSearch: () => void
 }
 
-const MODES: Array<{ id: WorkMode; label: string; hint: string }> = [
-  { id: 'remote', label: 'Remote', hint: 'Anywhere' },
-  { id: 'in-person', label: 'In person', hint: 'Commute from your address' },
-  { id: 'both', label: 'Both', hint: 'Remote + nearby offices' },
+const MODES: Array<{ id: WorkMode; label: string; icon: LucideIcon }> = [
+  { id: 'remote', label: 'Remote', icon: Globe },
+  { id: 'in-person', label: 'In person', icon: Building2 },
+  { id: 'both', label: 'Both', icon: Shuffle },
 ]
 
 export function SearchPreferences({
@@ -31,81 +38,98 @@ export function SearchPreferences({
 }: Props) {
   const needsAddress = workMode !== 'remote'
   const addressMissing = needsAddress && !address.trim()
+  const blocked = !canSearch || addressMissing
 
   return (
-    <section className="rounded-2xl border border-ink-900/10 bg-white p-5 shadow-card">
-      <h2 className="font-serif text-2xl font-medium text-ink-950">Where you’ll work</h2>
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
-        {MODES.map((mode) => {
-          const active = workMode === mode.id
-          return (
-            <button
-              key={mode.id}
-              type="button"
-              onClick={() => onWorkMode(mode.id)}
-              className={`rounded-xl border px-3 py-3 text-left transition ${
-                active
-                  ? 'border-ink-950 bg-ink-950 text-paper-50'
-                  : 'border-ink-900/10 bg-paper-50 hover:border-ink-900/25'
-              }`}
-            >
-              <span className="block text-sm font-semibold">{mode.label}</span>
-              <span className={`mt-0.5 block text-xs ${active ? 'text-paper-200' : 'text-ink-700'}`}>
-                {mode.hint}
-              </span>
-            </button>
-          )
-        })}
+    <div className="space-y-5">
+      <div>
+        <Label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Where you want to work
+        </Label>
+        <div className="mt-2.5 grid grid-cols-3 gap-1.5 rounded-xl border border-border/70 bg-secondary/30 p-1.5">
+          {MODES.map((mode) => {
+            const active = workMode === mode.id
+            const Icon = mode.icon
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => onWorkMode(mode.id)}
+                className={cn(
+                  'flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                  active
+                    ? 'bg-background text-foreground shadow-[0_1px_0_0_hsl(0_0%_100%/0.06)_inset,0_6px_16px_-8px_hsl(0_0%_0%/0.8)]'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Icon className={cn('size-4', active && 'text-primary')} />
+                {mode.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {needsAddress && (
-        <label className="mt-4 block">
-          <span className="text-sm font-semibold text-ink-950">Home or office address</span>
-          <input
-            value={address}
-            onChange={(event) => onAddress(event.target.value)}
-            required
-            placeholder="123 Main St, Austin, TX"
-            className="mt-1 w-full rounded-lg border border-ink-900/15 bg-paper-50 px-3 py-2 text-sm outline-none ring-rust-500/40 focus:ring-2"
-          />
-          <span className="mt-1 block text-xs text-ink-700">
-            Required for in-person listings. We use it only to estimate commute.
-          </span>
-        </label>
+        <div className="animate-fade-up space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="address">Home or office address</Label>
+            <Input
+              id="address"
+              value={address}
+              onChange={(event) => onAddress(event.target.value)}
+              placeholder="123 Main St, Austin, TX"
+            />
+            <p className="text-xs text-muted-foreground">
+              Used only to estimate commute for on-site listings.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between">
+              <Label>Max commute</Label>
+              <span className="font-mono text-sm text-primary">{maxCommuteMiles} mi</span>
+            </div>
+            <Slider
+              value={[maxCommuteMiles]}
+              min={5}
+              max={80}
+              step={5}
+              onValueChange={([value]) => onMaxCommute(value)}
+            />
+          </div>
+        </div>
       )}
 
-      {needsAddress && (
-        <label className="mt-4 block">
-          <span className="flex items-center justify-between text-sm font-semibold text-ink-950">
-            Max commute
-            <span className="font-normal text-ink-700">{maxCommuteMiles} miles</span>
-          </span>
-          <input
-            type="range"
-            min={5}
-            max={80}
-            step={5}
-            value={maxCommuteMiles}
-            onChange={(event) => onMaxCommute(Number(event.target.value))}
-            className="mt-2 w-full accent-rust-600"
-          />
-        </label>
-      )}
-
-      <button
-        type="button"
+      <Button
+        size="lg"
         onClick={onSearch}
-        disabled={!canSearch || searching || addressMissing}
-        className="mt-5 w-full rounded-full bg-rust-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rust-700 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={blocked || searching}
+        className="w-full"
       >
-        {searching ? 'Searching boards…' : 'Find matching jobs'}
-      </button>
-      {addressMissing && (
-        <p className="mt-2 text-sm text-rust-700">Add an address to search in-person jobs.</p>
+        {searching ? (
+          <>
+            <Loader2 className="animate-spin" />
+            Searching job boards…
+          </>
+        ) : (
+          <>
+            <Search />
+            Find matching jobs
+          </>
+        )}
+      </Button>
+
+      {!canSearch && (
+        <p className="text-center text-sm text-muted-foreground">
+          Add at least one repo so we know what you build.
+        </p>
       )}
-      {!canSearch && !addressMissing && (
-        <p className="mt-2 text-sm text-ink-700">Drop a repo first so we know what you build.</p>
+      {canSearch && addressMissing && (
+        <p className="text-center text-sm text-muted-foreground">
+          An address is required for in-person results.
+        </p>
       )}
-    </section>
+    </div>
   )
 }
