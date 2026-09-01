@@ -78,10 +78,62 @@ function primaryRole(skills: string[], languages: string[]): string {
   return skills[0] || languages[0] || 'software'
 }
 
-function jsearchQuery(skills: string[], languages: string[], workMode: WorkMode): string {
-  const role = primaryRole(skills, languages)
-  const place = workMode === 'remote' ? 'remote' : 'united states'
-  return `${role} developer jobs in ${place}`
+function cityFromAddress(address: string): string | null {
+  const parts = address
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length >= 2) {
+    const region = parts[parts.length - 1].replace(/\d+/g, '').trim()
+    const city = parts[parts.length - 2]
+    if (city && region) return `${city}, ${region}`
+    return city || null
+  }
+  return parts[0] || null
+}
+
+function uniquePreferredRoles(skills: string[], languages: string[]): string[] {
+  const have = new Map(
+    [...skills, ...languages].map((item) => [item.toLowerCase(), item]),
+  )
+  const roles: string[] = []
+  for (const name of ROLE_PREFERENCE) {
+    if (have.has(name.toLowerCase())) roles.push(name)
+    if (roles.length === 3) break
+  }
+  if (!roles.length) roles.push(primaryRole(skills, languages))
+  return roles
+}
+
+function jsearchQueries(
+  skills: string[],
+  languages: string[],
+  workMode: WorkMode,
+  address: string,
+): string[] {
+  const place =
+    workMode === 'remote' ? 'remote' : cityFromAddress(address) || 'united states'
+  return uniquePreferredRoles(skills, languages).map(
+    (role) => `${role} developer jobs in ${place}`,
+  )
+}
+
+const EXCLUDED_PUBLISHERS = [
+  'Lensa',
+  'Jooble',
+  'Jobright',
+  'Remote Spark',
+  'Remote Zest Jobs',
+  'Talents By Vaia',
+  'JobMESH',
+  'Iitjobs',
+  'Jobgether',
+  'Learn4Good',
+  'Vacancy Global Pro',
+]
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function fromMuse(queryHint: string): Promise<RawJob[]> {
@@ -296,24 +348,30 @@ async function fromJSearch(
   skills: string[],
   languages: string[],
   workMode: WorkMode,
+  address: string,
 ): Promise<RawJob[]> {
   const key = process.env.RAPIDAPI_KEY?.trim()
   if (!key) return []
 
-  const search = jsearchQuery(skills, languages, workMode)
+  const searches = jsearchQueries(skills, languages, workMode, address)
+  const collected: RawJob[] = []
 
-  try {
-    const jobs = await fetchJSearchPage(search, key, workMode)
-    const publishers: Record<string, number> = {}
-    for (const job of jobs) {
-      publishers[job.board] = (publishers[job.board] || 0) + 1
+  for (const [index, search] of searches.entries()) {
+    if (index > 0) await sleep(600)
+    try {
+      const jobs = await fetchJSearchPage(search, key, workMode)
+      const publishers: Record<string, number> = {}
+      for (const job of jobs) {
+        publishers[job.board] = (publishers[job.board] || 0) + 1
+      }
+      console.log(`[JSearch] query="${search}" jobs=${jobs.length}`, publishers)
+      collected.push(...jobs)
+    } catch (error) {
+      console.warn(`JSearch request failed for "${search}":`, error)
     }
-    console.log(`[JSearch] query="${search}" jobs=${jobs.length}`, publishers)
-    return jobs
-  } catch (error) {
-    console.warn('JSearch request failed:', error)
-    return []
   }
+
+  return collected
 }
 
 type JSearchHit = {
@@ -361,9 +419,10 @@ async function fetchJSearchPage(
 ): Promise<RawJob[]> {
   const params = new URLSearchParams({
     query: search,
-    num_pages: '1',
+    num_pages: '3',
     country: 'us',
     date_posted: 'all',
+    exclude_job_publishers: EXCLUDED_PUBLISHERS.join(','),
   })
   if (workMode === 'remote') params.set('work_from_home', 'true')
 
@@ -374,7 +433,7 @@ async function fetchJSearchPage(
       'X-RapidAPI-Key': key,
       'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
     },
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(45000),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -469,7 +528,7 @@ export async function searchJobs(request: SearchRequest): Promise<JobListing[]> 
     fromArbeitnow(),
     fromGreenhouse(),
     fromAdzuna(query, request.workMode),
-    fromJSearch(request.skills, request.languages, request.workMode),
+    fromJSearch(request.skills, request.languages, request.workMode, request.address),
   ]
   if (!inPersonOnly) {
     tasks.push(fromRemotive(query), fromJobicy(query))
@@ -485,5 +544,5 @@ export async function searchJobs(request: SearchRequest): Promise<JobListing[]> 
       score: scoreJob(job, request.skills, request.languages),
     }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 40)
+    .slice(0, 120)
 }

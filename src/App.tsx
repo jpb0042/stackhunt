@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { JobResults } from '@/components/JobResults'
 import { RepoDropZone } from '@/components/RepoDropZone'
 import { SearchPreferences } from '@/components/SearchPreferences'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { profileGithub, searchJobs } from '@/lib/api'
+import { loadSavedRepos, saveRepos } from '@/lib/storage'
 import { mergeLists } from '@shared/skills'
 import type { JobListing, RepoProfile, WorkMode } from '@shared/types'
 
 export default function App() {
-  const [repos, setRepos] = useState<RepoProfile[]>([])
+  const [repos, setRepos] = useState<RepoProfile[]>(loadSavedRepos)
   const [workMode, setWorkMode] = useState<WorkMode>('remote')
   const [address, setAddress] = useState('')
   const [maxCommuteMiles, setMaxCommuteMiles] = useState(30)
@@ -17,6 +18,10 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [githubBusy, setGithubBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    saveRepos(repos)
+  }, [repos])
 
   const skills = useMemo(() => mergeLists(...repos.map((repo) => repo.skills)), [repos])
   const languages = useMemo(
