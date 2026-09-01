@@ -75,8 +75,36 @@
     z-index: 0;
   }
 
-  .scrollbar-slim::-webkit-scrollbar {
-    width: 8px;
+  .wordmark-mask {
+    mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
+  }
+
+  .wordmark-text {
+    font-size: clamp(3rem, 13.5vw, 10.5rem);
+    /* Opaque fill so overlapping glyph contours (A, H, K, N) don't show seams. */
+    color: hsl(160 38% 18%);
+    text-shadow: 0 0 48px hsl(160 84% 45% / 0.16);
+    clip-path: inset(0 108% 0 -8%);
+    opacity: 0;
+  }
+
+  .hero-line,
+  .hero-sub,
+  .intro-card {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wordmark-text {
+      clip-path: none;
+      opacity: 1;
+    }
+
+    .hero-line,
+    .hero-sub,
+    .intro-card {
+      opacity: 1;
+    }
   }
 
   .scrollbar-slim::-webkit-scrollbar-thumb {

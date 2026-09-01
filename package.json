@@ -13,6 +13,7 @@
     "test:jsearch": "node scripts/test-jsearch.mjs"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@radix-ui/react-label": "^2.1.15",
     "@radix-ui/react-separator": "^1.1.15",
     "@radix-ui/react-slider": "^1.4.7",
@@ -22,6 +23,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "4.21.2",
+    "gsap": "^3.15.0",
     "lucide-react": "^1.39.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",

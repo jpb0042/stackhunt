@@ -1,13 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import gsap from 'gsap'
+import { useGSAP } from '@gsap/react'
+import { HeroCopy } from '@/components/HeroCopy'
 import { JobResults } from '@/components/JobResults'
 import { RepoDropZone } from '@/components/RepoDropZone'
 import { SearchPreferences } from '@/components/SearchPreferences'
+import { Wordmark } from '@/components/Wordmark'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { profileGithub, searchJobs } from '@/lib/api'
+import { INTRO } from '@/lib/intro'
 import { loadSavedRepos, saveRepos } from '@/lib/storage'
 import { mergeLists } from '@shared/skills'
 import type { JobListing, RepoProfile, WorkMode } from '@shared/types'
+
+gsap.registerPlugin(useGSAP)
 
 export default function App() {
   const [repos, setRepos] = useState<RepoProfile[]>(loadSavedRepos)
@@ -22,6 +29,27 @@ export default function App() {
   const [githubBusy, setGithubBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchToken, setSearchToken] = useState(0)
+  const dropCard = useRef<HTMLDivElement>(null)
+
+  useGSAP(() => {
+    const card = dropCard.current
+    if (!card) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      gsap.set(card, { opacity: 1, y: 0 })
+      return
+    }
+    gsap.fromTo(
+      card,
+      { opacity: 0, y: 18 },
+      {
+        opacity: 1,
+        y: 0,
+        duration: 0.8,
+        delay: INTRO.cardDelay,
+        ease: 'power3.out',
+      },
+    )
+  })
 
   useEffect(() => {
     saveRepos(repos)
@@ -111,30 +139,11 @@ export default function App() {
 
   return (
     <div className="glow-backdrop grid-backdrop relative min-h-screen">
-      <div
-        aria-hidden
-        className="relative z-10 w-full overflow-hidden select-none px-2 pt-3 sm:pt-4"
-      >
-        <p className="w-full text-center font-extrabold uppercase leading-none tracking-[0.06em] text-primary/20 text-[clamp(2.75rem,14vw,11rem)]">
-          STACKHUNT
-        </p>
-      </div>
+      <Wordmark />
       <main className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-28 pt-8 sm:pt-10">
-        <header className="text-center">
-          <h1 className="text-balance text-5xl font-bold leading-[1.05] tracking-tight sm:text-6xl">
-            Jobs for the work
-            <br />
-            <span className="bg-gradient-to-br from-foreground to-muted-foreground bg-clip-text text-transparent">
-              you already ship
-            </span>
-          </h1>
-          <p className="mx-auto mt-5 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground">
-            Drop in your repos and Stackhunt reads the stack you actually work in, then
-            pulls matching roles from public job boards with commute times included.
-          </p>
-        </header>
+        <HeroCopy />
 
-        <Card className="mt-12">
+        <Card ref={dropCard} className="intro-card mt-12">
           <CardContent className="space-y-6 p-6 sm:p-8">
             <RepoDropZone
               repos={repos}
