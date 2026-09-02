@@ -8,7 +8,7 @@ Drop in local project folders (or paste a public GitHub URL). Stackhunt reads ma
 
 - Drag-and-drop folders or add a GitHub repo
 - Remote, in-person, or both
-- Ranked results from JSearch (Google for Jobs: LinkedIn, Indeed, and others), The Muse, Arbeitnow, Greenhouse career pages, Remotive, and Jobicy
+- Ranked US-focused results from JSearch (prefer Indeed, ZipRecruiter, and LinkedIn apply links), The Muse, and Greenhouse engineering roles that match the inferred stack. Remotive, Jobicy, and Arbeitnow listings are kept only when they are US or worldwide-including-US.
 - First page loads ~40 listings; **Load more** appears only when another full page is available
 - Google Places autocomplete (pick a suggestion — typed text alone is not used)
 - Drive miles and minutes via Geocoding + Routes; jobs outside the radius or with no routable location are dropped

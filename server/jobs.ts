@@ -122,10 +122,60 @@ function jsearchQueries(
   address: string,
 ): string[] {
   const place =
-    workMode === 'remote' ? 'remote' : cityFromAddress(address) || 'united states'
+    workMode === 'remote' ? 'the United States' : cityFromAddress(address) || 'united states'
   return uniquePreferredRoles(skills, languages).map(
     (role) => `${role} developer jobs in ${place}`,
   )
+}
+
+const US_STATE_ABBR =
+  /,\s*(A[LKZR]|C[AOT]|D[CE]|FL|GA|HI|I[DLNA]|K[SY]|LA|M[EDAINSOT]|N[EVHJMYCD]|O[HKR]|P[AR]|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b/i
+
+const US_STATE_NAME =
+  /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|district of columbia)\b/i
+
+const US_COUNTRY =
+  /\b(united states(?: of america)?|u\.s\.a?\.?|usa)\b/i
+
+const WORLDWIDE_REMOTE =
+  /\b(worldwide|global|work from anywhere|anywhere in the world|any location|unrestricted|multiple countries|north america|americas?)\b/i
+
+const OVERSEAS_REGION =
+  /\b(europe|european union|\beu\b|emea|latam|latin america|apac|asia(?:-pacific)?|africa|india|united kingdom|\buk\b|england|scotland|wales|ireland|canada|mexico|germany|france|netherlands|spain|poland|ukraine|australia|brazil|argentina|philippines|nigeria|pakistan|bangladesh|china|japan|singapore|sweden|norway|denmark|finland|switzerland|austria|belgium|italy|portugal|romania|hungary|czech|israel|uae|dubai|estonia|lithuania|latvia|colombia|chile|peru)\b/i
+
+const OVERSEAS_CITY =
+  /\b(london|manchester|berlin|munich|amsterdam|dublin|paris|toronto|vancouver|montreal|ottawa|bangalore|bengaluru|hyderabad|pune|sydney|melbourne|warsaw|krakow|barcelona|lisbon|tel aviv|sao paulo)\b/i
+
+function hasUsSignal(value: string): boolean {
+  return US_COUNTRY.test(value) || US_STATE_ABBR.test(value) || US_STATE_NAME.test(value)
+}
+
+function isUnconstrainedRemote(value: string): boolean {
+  return /^(remote|not specified|flexible|anywhere)?$/i.test(value.trim())
+}
+
+function allowsUsRemote(location: string): boolean {
+  const value = location.trim()
+  if (!value) return true
+  if (hasUsSignal(value)) return true
+  const overseas = OVERSEAS_REGION.test(value) || OVERSEAS_CITY.test(value)
+  if (overseas && !WORLDWIDE_REMOTE.test(value)) return false
+  if (WORLDWIDE_REMOTE.test(value) && !/except.{0,24}\b(us|usa|u\.s\.|united states)\b/i.test(value)) {
+    return true
+  }
+  if (isUnconstrainedRemote(value)) return true
+  return !overseas
+}
+
+function isOverseasOnsite(location: string): boolean {
+  const value = location.trim()
+  if (!value || hasUsSignal(value)) return false
+  return OVERSEAS_REGION.test(value) || OVERSEAS_CITY.test(value)
+}
+
+function matchesRegion(job: RawJob): boolean {
+  if (job.remote) return allowsUsRemote(job.location)
+  return !isOverseasOnsite(job.location)
 }
 
 const EXCLUDED_PUBLISHERS = [
@@ -281,7 +331,38 @@ const GREENHOUSE_BOARDS = [
   'figma',
 ]
 
-async function fromGreenhouse(): Promise<RawJob[]> {
+const NON_ENGINEERING_TITLE =
+  /\b(product marketing|marketing|account executive|\bsales\b|recruiter|recruiting|counsel|attorney|\bgtm\b|program manager|product manager|project manager|strategist|partnerships?|business development|finance|accountant|designer|copywriter|\bbrand\b|community|customer success|solutions architect|technical program manager|\btpm\b|operations|advisory|compliance|people operations|\bhr\b|talent|legal|policy|enablement|success manager|account manager)\b/i
+
+const ENGINEERING_TITLE =
+  /\b(software engineer|\bswe\b|developer|front[- ]?end|back[- ]?end|full[- ]?stack|site reliability|\bsre\b|devops|platform engineer|infrastructure engineer|data engineer|machine learning engineer|\bml engineer\b|ios engineer|android engineer|mobile engineer|security engineer|systems engineer|staff engineer|principal engineer|distinguished engineer|research engineer|web engineer|firmware)\b/i
+
+const GENERIC_SOFTWARE_TITLE =
+  /\b(software engineer|\bswe\b|full[- ]?stack|front[- ]?end|back[- ]?end|web developer|web engineer)\b/i
+
+function titleMatchesStack(title: string, skills: string[], languages: string[]): boolean {
+  const hay = title.toLowerCase()
+  for (const skill of [...skills, ...languages]) {
+    const key = skill.toLowerCase().trim()
+    if (!key) continue
+    if (key === 'go' && /\b(?:golang|go)\b/i.test(hay)) return true
+    if (key === 'node.js' && /\bnode(?:\.js)?\b/i.test(hay)) return true
+    if (key === 'javascript' && /\bjavascript\b|\bjs\b/i.test(hay)) return true
+    if (key === 'typescript' && /\btypescript\b|\bts\b/i.test(hay)) return true
+    if (key === 'java' && /\bjava\b/i.test(hay) && !/javascript/.test(hay)) return true
+    if (key === 'c#' && /c#|c-sharp|csharp/i.test(hay)) return true
+    if (key.length >= 3 && key !== 'java' && hay.includes(key)) return true
+  }
+  return GENERIC_SOFTWARE_TITLE.test(hay)
+}
+
+function isRelevantEngineeringJob(title: string, skills: string[], languages: string[]): boolean {
+  if (NON_ENGINEERING_TITLE.test(title)) return false
+  if (!ENGINEERING_TITLE.test(title)) return false
+  return titleMatchesStack(title, skills, languages)
+}
+
+async function fromGreenhouse(skills: string[], languages: string[]): Promise<RawJob[]> {
   const results = await Promise.allSettled(
     GREENHOUSE_BOARDS.map(async (board) => {
       const data = (await getJson(
@@ -294,20 +375,22 @@ async function fromGreenhouse(): Promise<RawJob[]> {
           location?: { name?: string }
         }>
       }
-      return (data.jobs ?? []).map((job) => {
-        const location = job.location?.name || 'Not specified'
-        return {
-          id: `gh-${board}-${job.id}`,
-          title: job.title,
-          company: board.charAt(0).toUpperCase() + board.slice(1),
-          location,
-          remote: isRemoteText(location) || isRemoteText(job.title),
-          url: job.absolute_url,
-          source: 'Greenhouse',
-          board: `${board} careers`,
-          snippet: `${job.title} at ${board}`,
-        } satisfies RawJob
-      })
+      return (data.jobs ?? [])
+        .filter((job) => isRelevantEngineeringJob(job.title, skills, languages))
+        .map((job) => {
+          const location = job.location?.name || 'Not specified'
+          return {
+            id: `gh-${board}-${job.id}`,
+            title: job.title,
+            company: board.charAt(0).toUpperCase() + board.slice(1),
+            location,
+            remote: isRemoteText(location) || isRemoteText(job.title),
+            url: job.absolute_url,
+            source: 'Greenhouse',
+            board: `${board} careers`,
+            snippet: `${job.title} at ${board}`,
+          } satisfies RawJob
+        })
     }),
   )
   return results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
@@ -488,23 +571,47 @@ async function fetchJSearchPage(
   }).filter((job) => job.url)
 }
 
+function publisherRank(value: string): number {
+  const hay = value.toLowerCase()
+  if (hay.includes('indeed')) return 3
+  if (hay.includes('ziprecruiter') || hay.includes('zip recruiter')) return 2
+  if (hay.includes('linkedin')) return 1
+  return 0
+}
+
+function boardNameFrom(value: string, fallback?: string): string {
+  const hay = value.toLowerCase()
+  if (hay.includes('indeed')) return 'Indeed'
+  if (hay.includes('ziprecruiter') || hay.includes('zip recruiter')) return 'ZipRecruiter'
+  if (hay.includes('linkedin')) return 'LinkedIn'
+  return fallback || 'Google for Jobs'
+}
+
 function pickJSearchLink(job: JSearchHit): { url: string; board: string } {
-  const options = job.apply_options ?? []
-  const preferred = options.find((option) =>
-    /linkedin|indeed/i.test(`${option.publisher ?? ''} ${option.apply_link ?? ''}`),
+  const candidates: Array<{ url: string; label: string }> = []
+  for (const option of job.apply_options ?? []) {
+    if (option.apply_link) {
+      candidates.push({
+        url: option.apply_link,
+        label: `${option.publisher ?? ''} ${option.apply_link}`,
+      })
+    }
+  }
+  if (job.job_apply_link) {
+    candidates.push({
+      url: job.job_apply_link,
+      label: `${job.job_publisher ?? ''} ${job.job_apply_link}`,
+    })
+  }
+  candidates.sort(
+    (a, b) => publisherRank(b.label) - publisherRank(a.label),
   )
-  const url =
-    preferred?.apply_link ||
-    job.job_apply_link ||
-    options.find((option) => option.apply_link)?.apply_link ||
-    job.job_google_link ||
-    ''
-  const hay = `${preferred?.publisher ?? ''} ${job.job_publisher ?? ''} ${url}`.toLowerCase()
-  const board = hay.includes('linkedin')
-    ? 'LinkedIn'
-    : hay.includes('indeed')
-      ? 'Indeed'
-      : job.job_publisher || 'Google for Jobs'
+  const best = candidates[0]
+  const url = best?.url || job.job_google_link || ''
+  const board = boardNameFrom(
+    `${best?.label ?? ''} ${job.job_publisher ?? ''} ${url}`,
+    job.job_publisher,
+  )
   return { url, board }
 }
 
@@ -516,8 +623,8 @@ function matchesMode(job: RawJob, workMode: WorkMode): boolean {
 
 function boardPriority(job: RawJob): number {
   const hay = `${job.board} ${job.url}`.toLowerCase()
-  if (hay.includes('linkedin')) return 3
-  if (hay.includes('indeed')) return 2
+  const rank = publisherRank(hay)
+  if (rank) return rank + 1
   if (job.source === 'JSearch') return 1
   return 0
 }
@@ -582,7 +689,7 @@ async function gatherJobs(
     tasks.push(
       fromMuse(query),
       fromArbeitnow(),
-      fromGreenhouse(),
+      fromGreenhouse(request.skills, request.languages),
       fromAdzuna(query, request.workMode),
     )
     if (!inPersonOnly) tasks.push(fromRemotive(query), fromJobicy(query))
@@ -604,7 +711,7 @@ export async function searchJobs(request: SearchRequest): Promise<SearchPage> {
   if (page === 1) {
     const raw = await gatherJobs(request, { start: 0, count: 1, pages: 1 })
     const jobs = rankJobs(
-      raw.filter((job) => matchesMode(job, request.workMode)),
+      raw.filter((job) => matchesMode(job, request.workMode) && matchesRegion(job)),
       request.skills,
       request.languages,
     )
@@ -630,6 +737,7 @@ export async function searchJobs(request: SearchRequest): Promise<SearchPage> {
           extra.filter(
             (job) =>
               matchesMode(job, request.workMode) &&
+              matchesRegion(job) &&
               !seen.has(`${job.company.toLowerCase()}::${job.title.toLowerCase()}`),
           ),
           request.skills,
