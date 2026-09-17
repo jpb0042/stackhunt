@@ -173,8 +173,15 @@ function isOverseasOnsite(location: string): boolean {
   return OVERSEAS_REGION.test(value) || OVERSEAS_CITY.test(value)
 }
 
+function isMajorUsBoard(job: RawJob): boolean {
+  return publisherRank(`${job.board} ${job.url}`) > 0
+}
+
 function matchesRegion(job: RawJob): boolean {
-  if (job.remote) return allowsUsRemote(job.location)
+  if (job.remote) {
+    if (isMajorUsBoard(job)) return allowsUsRemote(job.location)
+    return hasUsSignal(job.location)
+  }
   return !isOverseasOnsite(job.location)
 }
 
@@ -262,34 +269,6 @@ async function fromRemotive(query: string): Promise<RawJob[]> {
     board: 'Remotive',
     snippet: snippet(job.description || ''),
   }))
-}
-
-async function fromArbeitnow(): Promise<RawJob[]> {
-  const data = (await getJson('https://www.arbeitnow.com/api/job-board-api')) as {
-    data?: Array<{
-      slug: string
-      title: string
-      company_name: string
-      location?: string
-      remote?: boolean
-      url: string
-      description?: string
-    }>
-  }
-  return (data.data ?? []).slice(0, 40).map((job) => {
-    const location = job.location || 'Not specified'
-    return {
-      id: `arbeitnow-${job.slug}`,
-      title: job.title,
-      company: job.company_name,
-      location,
-      remote: Boolean(job.remote) || isRemoteText(location),
-      url: job.url,
-      source: 'Arbeitnow',
-      board: 'Arbeitnow',
-      snippet: snippet(job.description || ''),
-    }
-  })
 }
 
 async function fromJobicy(query: string): Promise<RawJob[]> {
@@ -454,7 +433,7 @@ async function fromJSearch(
   const collected: RawJob[] = []
 
   for (const [index, search] of searches.entries()) {
-    if (index > 0) await sleep(600)
+    if (index > 0) await sleep(1200)
     try {
       const jobs = await fetchJSearchPage(search, key, workMode, range.pages)
       const publishers: Record<string, number> = {}
@@ -498,6 +477,14 @@ function jsearchLocation(job: JSearchHit): string {
   return [job.job_city, job.job_state, job.job_country].filter(Boolean).join(', ')
 }
 
+function jsearchCountry(job: JSearchHit): string {
+  if (job.job_country?.trim()) return job.job_country.trim().toUpperCase()
+  if (job.job_location && typeof job.job_location === 'object' && job.job_location.country) {
+    return job.job_location.country.trim().toUpperCase()
+  }
+  return ''
+}
+
 function jsearchHits(payload: unknown): JSearchHit[] {
   if (!payload || typeof payload !== 'object') return []
   const body = payload as { data?: unknown }
@@ -519,11 +506,34 @@ async function fetchJSearchPage(
     query: search,
     num_pages: String(pages),
     country: 'us',
-    date_posted: 'all',
+    language: 'en',
+    date_posted: 'month',
     exclude_job_publishers: EXCLUDED_PUBLISHERS.join(','),
   })
   if (workMode === 'remote') params.set('work_from_home', 'true')
 
+  const timeoutMs = pages > 1 ? 45000 : 35000
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await requestJSearch(key, params, timeoutMs)
+    } catch (error) {
+      lastError = error
+      const timedOut =
+        (error instanceof DOMException && error.name === 'TimeoutError') ||
+        (error instanceof Error && /timeout/i.test(error.message))
+      if (!timedOut || attempt === 1) throw error
+      await sleep(1000)
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('JSearch request failed')
+}
+
+async function requestJSearch(
+  key: string,
+  params: URLSearchParams,
+  timeoutMs: number,
+): Promise<RawJob[]> {
   const res = await fetch(`https://jsearch.p.rapidapi.com/search-v2?${params}`, {
     headers: {
       Accept: 'application/json',
@@ -531,7 +541,7 @@ async function fetchJSearchPage(
       'X-RapidAPI-Key': key,
       'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
     },
-    signal: AbortSignal.timeout(pages > 1 ? 45000 : 20000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -550,25 +560,31 @@ async function fetchJSearchPage(
     )
   }
 
-  return jsearchHits(payload).map((job) => {
-    const location = jsearchLocation(job)
-    const { url, board } = pickJSearchLink(job)
-    return {
-      id: `jsearch-${job.job_id}`,
-      title: job.job_title,
-      company: job.employer_name,
-      location: location || (job.job_is_remote ? 'Remote' : 'Not specified'),
-      remote:
-        Boolean(job.job_is_remote) ||
-        isRemoteText(location) ||
-        isRemoteText(job.job_title) ||
-        isRemoteText(job.job_description || ''),
-      url,
-      source: 'JSearch',
-      board,
-      snippet: snippet(job.job_description || ''),
-    }
-  }).filter((job) => job.url)
+  return jsearchHits(payload)
+    .filter((job) => {
+      const country = jsearchCountry(job)
+      return !country || country === 'US' || country === 'USA'
+    })
+    .map((job) => {
+      const location = jsearchLocation(job)
+      const { url, board } = pickJSearchLink(job)
+      return {
+        id: `jsearch-${job.job_id}`,
+        title: job.job_title,
+        company: job.employer_name,
+        location: location || (job.job_is_remote ? 'Remote' : 'Not specified'),
+        remote:
+          Boolean(job.job_is_remote) ||
+          isRemoteText(location) ||
+          isRemoteText(job.job_title) ||
+          isRemoteText(job.job_description || ''),
+        url,
+        source: 'JSearch',
+        board,
+        snippet: snippet(job.job_description || ''),
+      }
+    })
+    .filter((job) => job.url)
 }
 
 function publisherRank(value: string): number {
@@ -661,13 +677,25 @@ function searchCacheKey(request: SearchRequest): string {
   })
 }
 
+function usLocationRank(job: RawJob): number {
+  if (hasUsSignal(job.location)) return 2
+  if (WORLDWIDE_REMOTE.test(job.location) || isUnconstrainedRemote(job.location)) return 1
+  return 0
+}
+
 function rankJobs(jobs: RawJob[], skills: string[], languages: string[]): JobListing[] {
   return dedupe(jobs)
     .map((job) => ({
       ...job,
       score: scoreJob(job, skills, languages),
     }))
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      const scoreDiff = b.score - a.score
+      if (scoreDiff) return scoreDiff
+      const boardDiff = boardPriority(b) - boardPriority(a)
+      if (boardDiff) return boardDiff
+      return usLocationRank(b) - usLocationRank(a)
+    })
 }
 
 async function gatherJobs(
@@ -688,7 +716,6 @@ async function gatherJobs(
   if (jsearch.start === 0) {
     tasks.push(
       fromMuse(query),
-      fromArbeitnow(),
       fromGreenhouse(request.skills, request.languages),
       fromAdzuna(query, request.workMode),
     )
